@@ -1,0 +1,100 @@
+---
+title: "Final Project"
+author: "Jose Rivas"
+date: "22 de abril de 2017"
+output: html_document
+---
+
+```{r Libraries, warning=FALSE, message=FALSE}
+library(caret)
+library(rpart)
+library(plyr)
+library(randomForest)
+library(gbm)
+library(ipred)
+library(e1071)
+```
+
+## Getting Data
+The following code reads Training and Testing datasets into R, and display a view of their structure.
+```{r Datagetting}
+#Read datasets into R
+testing <- read.csv("C:/Users/jose_/Documents/Data Science/Machine Learning/pml-testing.csv", na.strings = c("NA", ""))
+training <- read.csv("C:/Users/jose_/Documents/Data Science/Machine Learning/pml-training.csv", na.strings = c("NA", ""))
+#display Training structure
+str(training, list.len=25)
+```
+
+## Cleaning Data
+There are some variables that have NA or #DIV/O! in some of their rows. As they cannot be used for prediction, they must be deleted. Some other variables as "user_name" cannot be used as predictors as they are not related to the variable to predict. First seven variables will then be deleted as well.
+```{r Datacleaning}
+#Eliminate columns with NA
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+#Eliminate first seven columns
+training <- training[, -c(1:7)]
+testing <- testing[, -c(1:7)]
+nrow(training); nrow(testing)
+```
+
+## Create Partition of Training dataset into Training and Validating
+The size of Training and Testing datasets is highly unbalanced. We need to create a new Validating dataset with a partition of Training to reduce the probability of out-of-sample deviations. The chosen percentage was 70% Training, 30% Validating
+```{r partition}
+#Set seed and create Train and Valid datasets from Training
+set.seed(2882) 
+inTrain <- createDataPartition(training$classe, p = 0.7, list = FALSE)
+train <- training[inTrain, ]
+valid <- training[-inTrain, ]
+test <- testing
+```
+
+## Create Predictive Models
+To make a selection of the best predictive model, I am going to use three different models: Trees, Random Forest and Boosting. And then, compare their resulting accuracies on predictions for the Validation Dataset.
+
+The computing timing of some of these models make them unfeasible. To arrange this, we're going to create a control variable with some parameter to pass to the trControl parameter on the Train Function:
+method = CV (to define cross validation as the method for resampling)
+number = 5 (limit the number of resampling iterations to 5)
+```{r models}
+#Trcontrol parameters
+control <- trainControl(method="cv", number = 5)
+#Trees Model
+mod_trees <- train(classe~., method="rpart", data=train, trControl=control)
+pred_trees <- predict(mod_trees, valid)
+confusionMatrix(valid$classe, pred_trees)$overall[1]
+#Random Forest Model
+mod_rf <- train(classe~., method="rf", data=train, trControl=control)
+pred_rf <- predict(mod_rf, valid)
+confusionMatrix(valid$classe, pred_rf)$overall[1]
+#Boosting Model
+mod_boost <- train(classe~., method="gbm", data=train, verbose=FALSE, trControl=control)
+pred_boost <- predict(mod_boost, valid)
+confusionMatrix(valid$classe, pred_boost)$overall[1]
+```
+
+## Select the best models
+The best models by accuracy are Random Forest (0.99) and Boosting (0.96). They both seem to perform pretty well, but this high values may be indicating data overfitting. I´m going to compare matrixes for both predictions 
+```{r compare}
+#Compare predictions on Validating dataset
+confusionMatrix(valid$classe, pred_rf)$table
+confusionMatrix(valid$classe, pred_boost)$table
+```
+
+## Ensemble Model
+To check if there is a possible improvement in the prediction, I´m going to ensemble a new model combining the best two predictions: Random Forest and Boosting
+```{r combine}
+#Create dataset with best two predictions
+df_comb <- data.frame(pred_rf, pred_boost, classe=valid$classe)
+#ensemble them using the Treebag model
+mod_comb <- train(classe~., method="treebag", data=df_comb)
+pred_comb <- predict(mod_comb, df_comb)
+confusionMatrix(valid$classe, pred_comb)$overall[1]
+```
+The accuracy of this ensembled model is exactly the same as the Random Forest, so it seems this model is prevailing after all, and it offers the most accurate prediction.
+
+## Make predictions for Testing Dataset
+Using the Random Forest model on the Testing datasets gives us the final predictions.
+```{r final}
+#Use random Forest model to predict Testing
+pred_final <- predict(mod_rf, test)
+pred_final
+```
